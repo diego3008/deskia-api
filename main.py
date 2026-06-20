@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from telegram import Update
 from telegram.ext import Application
-from src.api import telegram_router
+from src.api import telegram_router, businesses_router, appointments_router
 from src.config import settings
 
 logging.basicConfig(
@@ -18,7 +18,7 @@ def build_ptb() -> Application:
     return (
         Application.builder()
         .token(settings.BOT_TOKEN)
-        .updater(None)  # Gateway handles updates, not PTB's built-in polling
+        .updater(None)
         .build()
     )
 
@@ -50,10 +50,6 @@ app = FastAPI(
 )
 
 app.include_router(telegram_router)
-
-
-from src.api.businesses import router as businesses_router
-from src.api.appointments import router as appointments_router
 app.include_router(businesses_router)
 app.include_router(appointments_router)
 
