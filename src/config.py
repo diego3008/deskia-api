@@ -1,13 +1,30 @@
+from functools import lru_cache
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    # Bot
     BOT_TOKEN: str
     WEBHOOK_URL: str
-    AGENT_SERVICE_URL: str  # where your agent API lives
+
+    # Agent service
+    AGENT_SERVICE_URL: str
     LANGGRAPH_ASSISTANT_ID: str
-    LAGGRAPH_API_KEY: str
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    LANGGRAPH_API_KEY: str  # fixed typo: LAGGRAPH -> LANGGRAPH
+
+    # Database
+    DATABASE_URL: str  # must use postgresql+asyncpg:// scheme
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,  # BOT_TOKEN and bot_token both work
+    )
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()  # module-level singleton still works
