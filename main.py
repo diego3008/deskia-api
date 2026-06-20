@@ -53,7 +53,9 @@ app.include_router(telegram_router)
 
 
 from src.api.businesses import router as businesses_router
+from src.api.appointments import router as appointments_router
 app.include_router(businesses_router)
+app.include_router(appointments_router)
 
 
 @app.get("/health", tags=["Health"])
