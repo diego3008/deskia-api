@@ -1,8 +1,11 @@
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from src.models.business import Business
 from src.db import get_session
 from src.models.appointment import Appointment, AppointmentBase, AppointmentUpdate
 
@@ -30,6 +33,30 @@ async def list_appointments(
         query = query.where(Appointment.business_id == business_id)
     result = await session.exec(query)
     return result.all()
+
+
+@router.get("/availability", response_model=bool)
+async def check_availability(
+    business_id: UUID,
+    starts_at: date,
+    session: AsyncSession = Depends(get_session),
+):
+    business = await session.get(Business, business_id)
+    if business is None:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    tz = ZoneInfo(business.timezone)
+    day_start = datetime(starts_at.year, starts_at.month, starts_at.day, tzinfo=tz)
+    day_end = day_start + timedelta(days=1)
+
+    query = (
+        select(Appointment)
+        .where(Appointment.business_id == business_id)
+        .where(Appointment.starts_at >= day_start)
+        .where(Appointment.starts_at < day_end)
+    )
+    result = await session.exec(query)
+    return result.first() is None
 
 
 @router.get("/{id}", response_model=Appointment)

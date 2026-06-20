@@ -1,13 +1,13 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID, uuid4
 from pydantic import BaseModel
-from sqlalchemy import Column, ForeignKey
+from sqlalchemy import Column, DateTime, ForeignKey
 from sqlmodel import Field, SQLModel
 
 
 class AppointmentBase(SQLModel):
-    starts_at: datetime
-    ends_at: datetime
+    starts_at: datetime = Field(sa_type=DateTime(timezone=True))
+    ends_at: datetime = Field(sa_type=DateTime(timezone=True))
     status: str
     notes: str | None = None
     business_id: UUID = Field(
@@ -28,3 +28,8 @@ class AppointmentUpdate(BaseModel):
     ends_at: datetime | None = None
     status: str | None = None
     notes: str | None = None
+
+
+class AppointmentSearch(BaseModel):
+    starts_at: date | None = None
+    business_id: UUID | None = None
