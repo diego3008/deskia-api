@@ -52,6 +52,10 @@ app = FastAPI(
 app.include_router(telegram_router)
 
 
+from src.api.businesses import router as businesses_router
+app.include_router(businesses_router)
+
+
 @app.get("/health", tags=["Health"])
 async def health():
     return {"status": "ok"}
