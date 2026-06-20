@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from telegram import Update
 from telegram.ext import Application
-from src.api import telegram_router, businesses_router, appointments_router
+from src.api import telegram_router, businesses_router, appointments_router, customers_router, conversations_router
 from src.config import settings
 
 logging.basicConfig(
@@ -52,6 +52,8 @@ app = FastAPI(
 app.include_router(telegram_router)
 app.include_router(businesses_router)
 app.include_router(appointments_router)
+app.include_router(customers_router)
+app.include_router(conversations_router)
 
 
 @app.get("/health", tags=["Health"])
