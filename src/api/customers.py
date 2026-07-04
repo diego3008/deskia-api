@@ -32,12 +32,28 @@ async def list_customers(
     return result.all()
 
 
+@router.get("/search", response_model=Customer)
+async def search_customer_by_email(
+    email: str,
+    business_id: Optional[UUID] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    query = select(Customer).where(Customer.email == email)
+    if business_id is not None:
+        query = query.where(Customer.business_id == business_id)
+    result = await session.exec(query)
+    obj = result.first()
+    if not obj:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    return obj
+
+
 @router.get("/{id}", response_model=Customer)
 async def get_customer(id: UUID, session: AsyncSession = Depends(get_session)):
     obj = await session.get(Customer, id)
     if not obj:
         raise HTTPException(status_code=404, detail="Customer not found")
-    return obj
+    return obj.model_dump_json()
 
 
 @router.patch("/{id}", response_model=Customer)
