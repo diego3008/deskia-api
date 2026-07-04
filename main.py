@@ -6,6 +6,7 @@ from telegram import Update
 from telegram.ext import Application
 from src.api import telegram_router, businesses_router, appointments_router, customers_router, conversations_router
 from src.config import settings
+from src.db import engine
 
 logging.basicConfig(
     level="INFO",
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
         await ptb.start()
         yield
         await ptb.stop()
+    
+    await engine.dispose()
 
 
 app = FastAPI(
