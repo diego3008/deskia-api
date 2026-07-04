@@ -15,6 +15,8 @@ class ConversationBase(SQLModel):
     telegram_chat_id: int = Field(sa_type=BigInteger)
     thread_id: UUID | None = None
     status: str = Field(default="active")
+    message_count: int = Field(default=1)
+    parent_thread_id: UUID | None = None
 
 
 class Conversation(ConversationBase, table=True):
@@ -25,6 +27,16 @@ class Conversation(ConversationBase, table=True):
     updated_at: datetime | None = Field(default=None)
 
 
+class ConversationCreate(BaseModel):
+    business_id: UUID
+    customer_id: UUID
+    telegram_chat_id: int
+    thread_id: UUID | None = None
+    status: str = "active"
+    message_count: int = 1
+
+
 class ConversationUpdate(BaseModel):
     thread_id: UUID | None = None
     status: str | None = None
+    message_count: int | None = None
