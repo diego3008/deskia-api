@@ -4,8 +4,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from telegram import Update
 from telegram.ext import Application
-from src.api import telegram_router
+from src.api import telegram_router, businesses_router, appointments_router, customers_router, conversations_router
 from src.config import settings
+from src.db import engine
 
 logging.basicConfig(
     level="INFO",
@@ -18,7 +19,7 @@ def build_ptb() -> Application:
     return (
         Application.builder()
         .token(settings.BOT_TOKEN)
-        .updater(None)  # Gateway handles updates, not PTB's built-in polling
+        .updater(None)
         .build()
     )
 
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
         await ptb.start()
         yield
         await ptb.stop()
+    
+    await engine.dispose()
 
 
 app = FastAPI(
@@ -50,6 +53,10 @@ app = FastAPI(
 )
 
 app.include_router(telegram_router)
+app.include_router(businesses_router)
+app.include_router(appointments_router)
+app.include_router(customers_router)
+app.include_router(conversations_router)
 
 
 @app.get("/health", tags=["Health"])
