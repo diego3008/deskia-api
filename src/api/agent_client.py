@@ -53,8 +53,12 @@ async def forward_to_agent(message: IncomingMessage) -> AgentResponse | None:
         await increment_message_count(
             conversation_id=thread.id,
         )
+        content = ai_message.get("content", "")
 
-        return AgentResponse(text=ai_message.get("content", [""]))
+        if isinstance(content, list):
+            content = " ".join(block.get("text", "") for block in content if isinstance(block, dict))
+
+        return AgentResponse(text=content or "Gracias, ya se tienen tus datos en el sistema. En qué fecha te gustaría agendar?")
 
     except httpx.HTTPStatusError as e:
         logger.error("Agent service error: %s", e.response.text)

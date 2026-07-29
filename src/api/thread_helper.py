@@ -5,15 +5,19 @@ from uuid import UUID, uuid4
 import httpx
 from sqlalchemy import Date
 from sqlmodel import select
+import logging
 
 from src.db import _async_session_factory
 from src.models.conversation import Conversation
 from src.config import settings
 
+logger = logging.getLogger(__name__)
+
 MAX_MESSAGES = 30
 
 
 async def get_or_rotate_thread(chat_id: str) -> Union[Conversation, bool] | None:
+    # get existing conversation from db
     async with _async_session_factory() as session:
         result = await session.exec(
             select(Conversation).where(Conversation.telegram_chat_id == int(chat_id)).where(Conversation.status == 'active')
@@ -22,12 +26,21 @@ async def get_or_rotate_thread(chat_id: str) -> Union[Conversation, bool] | None
 
     if conversation is None:
         return None
+    
+    # check thread existence in langgraph storage
+    if await get_thread(conversation.thread_id) is not None:
 
-    if conversation.message_count >= MAX_MESSAGES:
-        new_thread = await _rotate_thread(conversation)
-        return new_thread, True
 
-    return conversation, False
+        # check if conversation hits messages limit
+        if conversation.message_count >= MAX_MESSAGES:
+            new_thread = await _rotate_thread(conversation)
+            return new_thread, True
+
+        return conversation, False
+    
+    new_thread = await _rotate_thread(conversation)
+    return new_thread, True
+
 
 
 async def _rotate_thread(previous: Conversation) -> Conversation:
@@ -92,3 +105,17 @@ async def get_context_from_langgraph(parent_thread_id: str, n: int = 10) -> list
             break  # latest snapshot has all accumulated messages
 
     return all_messages[-n:]
+
+
+async def get_thread(thread_id: UUID) -> bool:
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{settings.AGENT_SERVICE_URL}/threads/{thread_id}"
+            )
+        response.raise_for_status()
+        new_client = response.json()
+        return new_client
+    except httpx.HTTPStatusError as e:
+        logger.error("Agent service error: %s", e.response.text)
+        return None
