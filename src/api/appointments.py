@@ -59,6 +59,52 @@ async def check_availability(
     return result.first() is None
 
 
+@router.get("/count", response_model=int)
+async def count_appointments(
+    business_id: Optional[UUID] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    now = datetime.now(ZoneInfo("America/Monterrey"))
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    query = select(func.count()).select_from(Appointment).where(Appointment.created_at >= month_start)
+    if business_id is not None:
+        query = query.where(Appointment.business_id == business_id)
+
+    result = await session.exec(query)
+    return result.one()
+
+
+@router.get("/growth", response_model=Optional[float])
+async def count_appointments_growth(
+    business_id: Optional[UUID] = None,
+    session: AsyncSession = Depends(get_session),
+):
+    now = datetime.now(ZoneInfo("America/Monterrey"))
+    this_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_month_start = (this_month_start - timedelta(days=1)).replace(day=1)
+
+    async def count_between(start: datetime, end: datetime) -> int:
+        query = (
+            select(func.count())
+            .select_from(Appointment)
+            .where(Appointment.created_at >= start)
+            .where(Appointment.created_at < end)
+        )
+        if business_id is not None:
+            query = query.where(Appointment.business_id == business_id)
+        result = await session.exec(query)
+        return result.one()
+
+    this_month_count = await count_between(this_month_start, now)
+    last_month_count = await count_between(last_month_start, this_month_start)
+
+    if last_month_count == 0:
+        return None
+
+    return ((this_month_count - last_month_count) / last_month_count) * 100
+
+
 @router.get('/find_customer_appointment', response_model=Appointment | None)
 async def find_customer_appointment(
     customer_id: str,
