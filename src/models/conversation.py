@@ -7,10 +7,14 @@ from sqlmodel import Field, SQLModel
 
 class ConversationBase(SQLModel):
     business_id: UUID = Field(
-        sa_column=Column("business_id", ForeignKey("businesses.id"), nullable=False)
+        sa_column=Column(
+            "business_id", ForeignKey("deskia.business.id"), nullable=False
+        )
     )
     customer_id: UUID = Field(
-        sa_column=Column("customer_id", ForeignKey("customers.id"), nullable=False)
+        sa_column=Column(
+            "customer_id", ForeignKey("deskia.customers.id"), nullable=False
+        )
     )
     telegram_chat_id: int = Field(sa_type=BigInteger)
     thread_id: UUID | None = None
@@ -21,6 +25,7 @@ class ConversationBase(SQLModel):
 
 class Conversation(ConversationBase, table=True):
     __tablename__ = "conversations"
+    __table_args__ = {"schema": "deskia"}
 
     id: UUID | None = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime | None = Field(default=None)

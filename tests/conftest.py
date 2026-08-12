@@ -10,7 +10,10 @@ from src.db import get_session
 
 @pytest_asyncio.fixture
 async def session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    engine = create_async_engine(
+        "sqlite+aiosqlite:///:memory:",
+        execution_options={"schema_translate_map": {"deskia": None}},
+    )
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

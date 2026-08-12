@@ -13,7 +13,8 @@ class BusinessBase(SQLModel):
 
 
 class Business(BusinessBase, table=True):
-    __tablename__ = "businesses"
+    __tablename__ = "business"
+    __table_args__ = {"schema": "deskia"}
 
     id: UUID | None = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime | None = Field(default=None)

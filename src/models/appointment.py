@@ -11,15 +11,20 @@ class AppointmentBase(SQLModel):
     active: bool = Field(default=True)
     notes: str | None = None
     business_id: UUID = Field(
-        sa_column=Column("business", ForeignKey("businesses.id"), nullable=False)
+        sa_column=Column(
+            "business_id", ForeignKey("deskia.business.id"), nullable=False
+        )
     )
     customer_id: UUID = Field(
-        sa_column=Column("customer_id", ForeignKey("customers.id"), nullable=False)
+        sa_column=Column(
+            "customer_id", ForeignKey("deskia.customers.id"), nullable=False
+        )
     )
 
 
 class Appointment(AppointmentBase, table=True):
     __tablename__ = "appointments"
+    __table_args__ = {"schema": "deskia"}
 
     id: UUID | None = Field(default_factory=uuid4, primary_key=True)
     created_at: datetime | None = Field(
@@ -63,4 +68,3 @@ class AppointmentCreate(BaseModel):
     customer_id: UUID = Field(
         description="The UUID of the customer who requested the appointment."
     )
-
