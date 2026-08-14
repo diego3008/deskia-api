@@ -1,16 +1,40 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.models.business import Business
 from src.db import get_session
-from src.models.appointment import Appointment, AppointmentBase, AppointmentCreate, AppointmentUpdate
+from src.models.appointment import (
+    Appointment,
+    AppointmentBase,
+    AppointmentCancellationRequest,
+    AppointmentCancellationResponse,
+    AppointmentCreate,
+    AppointmentUpdate,
+)
+from src.models.appointment_status_codes import AppointmentStatusCode
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
+
+
+def utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
+def cancellation_response(appointment: Appointment) -> AppointmentCancellationResponse:
+    return AppointmentCancellationResponse(
+        id=appointment.id,
+        status="cancelled",
+        cancelled_at=utc_datetime(appointment.cancelled_at),
+        starts_at=utc_datetime(appointment.starts_at),
+        ends_at=utc_datetime(appointment.ends_at),
+    )
 
 
 @router.post("/", response_model=Appointment)
@@ -131,12 +155,72 @@ async def find_customer_appointment(
 async def book_appointment(
     appointment: AppointmentCreate, session: AsyncSession = Depends(get_session)
 ):
-    db_obj = Appointment.model_validate(appointment, update={"status": "pending"})
+    pending_status_result = await session.exec(
+        select(AppointmentStatusCode).where(AppointmentStatusCode.value == "pending")
+    )
+    pending_status = pending_status_result.first()
+    if pending_status is None:
+        raise HTTPException(status_code=500, detail="Pending status code is not configured")
+
+    db_obj = Appointment.model_validate(appointment, update={"status": pending_status.id})
     print(appointment.customer_id)
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)
     return {"starts_at": db_obj.starts_at.astimezone(ZoneInfo("America/Monterrey")), "ends_at": db_obj.ends_at.astimezone(ZoneInfo("America/Monterrey"))}
+
+
+@router.post(
+    "/{appointment_id}/cancel",
+    response_model=AppointmentCancellationResponse,
+)
+async def cancel_appointment(
+    appointment_id: UUID,
+    data: AppointmentCancellationRequest,
+    session: AsyncSession = Depends(get_session),
+):
+    result = await session.exec(
+        select(Appointment)
+        .where(Appointment.id == appointment_id)
+        .where(Appointment.business_id == data.business_id)
+        .where(Appointment.customer_id == data.customer_id)
+    )
+    appointment = result.first()
+    if appointment is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    current_status = await session.get(AppointmentStatusCode, appointment.status)
+    if current_status is not None and current_status.value == "completed":
+        raise HTTPException(
+            status_code=409,
+            detail="Completed appointments cannot be cancelled",
+        )
+
+    if current_status is not None and current_status.value == "cancelled":
+        if appointment.cancelled_at is None:
+            appointment.cancelled_at = datetime.now(UTC)
+            appointment.active = False
+            session.add(appointment)
+            await session.commit()
+            await session.refresh(appointment)
+        return cancellation_response(appointment)
+
+    cancelled_status_result = await session.exec(
+        select(AppointmentStatusCode).where(AppointmentStatusCode.value == "cancelled")
+    )
+    cancelled_status = cancelled_status_result.first()
+    if cancelled_status is None:
+        raise HTTPException(status_code=500, detail="Cancelled status code is not configured")
+
+    appointment.status = cancelled_status.id
+    appointment.cancellation_reason = data.reason
+    appointment.cancelled_at = datetime.now(UTC)
+    appointment.active = False
+    session.add(appointment)
+    await session.commit()
+    await session.refresh(appointment)
+
+    return cancellation_response(appointment)
 
 
 @router.get("/{id}", response_model=Appointment)

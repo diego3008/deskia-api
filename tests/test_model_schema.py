@@ -18,4 +18,8 @@ def test_foreign_keys_reference_tables_in_deskia_schema():
         for foreign_key in model.__table__.foreign_keys
     }
 
-    assert targets == {"deskia.business.id", "deskia.customers.id"}
+    assert targets == {
+        "deskia.appointment_status_codes.id",
+        "deskia.business.id",
+        "deskia.customers.id",
+    }

@@ -1,8 +1,10 @@
 from datetime import date, datetime
 from uuid import UUID, uuid4
 from pydantic import BaseModel
-from sqlalchemy import Column, DateTime, ForeignKey, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
 from sqlmodel import Field, SQLModel
+
+from src.models.appointment_status_codes import AppointmentStatusCode  # noqa: F401
 
 
 class AppointmentBase(SQLModel):
@@ -19,6 +21,19 @@ class AppointmentBase(SQLModel):
         sa_column=Column(
             "customer_id", ForeignKey("deskia.customers.id"), nullable=False
         )
+    )
+    status: int = Field(
+        sa_column=Column(
+            Integer, ForeignKey("deskia.appointment_status_codes.id"), nullable=False
+        )
+    )
+    cancellation_reason: str | None = Field(
+        default=None,
+        sa_column=Column(String, nullable=True),
+    )
+    cancelled_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
 
@@ -68,3 +83,15 @@ class AppointmentCreate(BaseModel):
     customer_id: UUID = Field(
         description="The UUID of the customer who requested the appointment."
     )
+class AppointmentCancellationRequest(BaseModel):
+    business_id: UUID
+    customer_id: UUID
+    reason: str
+
+
+class AppointmentCancellationResponse(BaseModel):
+    id: UUID
+    status: str
+    cancelled_at: datetime
+    starts_at: datetime
+    ends_at: datetime
