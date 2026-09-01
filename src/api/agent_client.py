@@ -4,38 +4,29 @@ from src.config import settings
 from src.db import _async_session_factory
 from src.models.conversation import Conversation
 from src.schemas import IncomingMessage, AgentResponse
-from src.api.thread_helper import get_context_from_langgraph, get_or_rotate_thread, increment_message_count
+from src.api.thread_helper import get_thread_id
 
 logger = logging.getLogger(__name__)
 
 async def forward_to_agent(message: IncomingMessage) -> AgentResponse | None:
     try:
-        thread, isNew = await get_or_rotate_thread(
+        thread, business = await get_thread_id(
             chat_id=message.chat_id,
         )
 
         if thread is None:
             return None
         
-        input_payload = {"messages": [message.model_dump()], "business_id": str(thread.business_id)}
-
-        if isNew and thread.parent_thread_id:
-            context_messages = await get_context_from_langgraph(thread.parent_thread_id)
-            if context_messages:
-                input_payload = {
-                    "messages": context_messages + [message.model_dump()],
-                    "business_id": str(thread.business_id)
-                }
+        input_payload = {"messages": [message.model_dump()], "business_id": str(business)}
         
-
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                f"{settings.AGENT_SERVICE_URL}/threads/{thread.thread_id}/runs/wait",
+                f"{settings.AGENT_SERVICE_URL}/threads/{thread}/runs/wait",
                 json={
                     "assistant_id": settings.LANGGRAPH_ASSISTANT_ID,
                     "input": input_payload
-                },
+                }
             )
             response.raise_for_status()
             result = response.json()
@@ -48,17 +39,12 @@ async def forward_to_agent(message: IncomingMessage) -> AgentResponse | None:
         if ai_message is None:
             return None
 
-    
-
-        await increment_message_count(
-            conversation_id=thread.id,
-        )
         content = ai_message.get("content", "")
 
         if isinstance(content, list):
             content = " ".join(block.get("text", "") for block in content if isinstance(block, dict))
 
-        return AgentResponse(text=content or "Gracias, ya se tienen tus datos en el sistema. En qué fecha te gustaría agendar?")
+        return AgentResponse(text=content)
 
     except httpx.HTTPStatusError as e:
         logger.error("Agent service error: %s", e.response.text)
