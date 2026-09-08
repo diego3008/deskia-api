@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, text
 from sqlmodel import Field, SQLModel
 
 
@@ -23,6 +23,7 @@ class StaffBlock(StaffBlockBase, table=True):
     __tablename__ = "staff_blocks"
     __table_args__ = (
         CheckConstraint("start_at < end_at", name="staff_blocks_check"),
+        Index("idx_staff_blocks_staff_dates", "business_staff_id", "start_at", "end_at"),
     )
 
     id: UUID | None = Field(
