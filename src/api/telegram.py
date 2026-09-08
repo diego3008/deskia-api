@@ -3,6 +3,7 @@ from http import HTTPStatus
 
 from fastapi import APIRouter, Request, Response
 from telegram import Update
+from telegram.constants import ParseMode
 
 from .agent_client import forward_to_agent
 from src.schemas import IncomingMessage
@@ -42,11 +43,13 @@ async def telegram_webhook(request: Request):
         )
 
         agent_response = await forward_to_agent(msg)
+        formatted_text = agent_response.text.replace("**", "*")
 
         if agent_response:
             await ptb.bot.send_message(
                 chat_id=msg.chat_id,
-                text=agent_response.text,
+                text=formatted_text,
+                parse_mode=ParseMode.MARKDOWN,
             )
 
     except Exception:
