@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -118,6 +118,56 @@ async def book_appointment(
     await session.commit()
     await session.refresh(db_obj)
     return {"starts_at": db_obj.starts_at.astimezone(ZoneInfo("America/Monterrey")), "ends_at": db_obj.ends_at.astimezone(ZoneInfo("America/Monterrey"))}
+
+
+@router.put("/reschedule", response_model=dict)
+async def reschedule_appointment(
+    business_id: UUID,
+    appointment_id: UUID,
+    starts_at: datetime = Body(...),
+    ends_at: datetime = Body(...),
+    session: AsyncSession = Depends(get_session),
+):
+    row = (await session.exec(
+        select(Appointment, BusinessStaff.first_name, BusinessStaff.last_name)
+        .join(BusinessStaff, BusinessStaff.id == Appointment.business_staff_id)
+        .where(
+            Appointment.id == appointment_id,
+            Appointment.business_id == business_id,
+        )
+    )).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if starts_at >= ends_at:
+        raise HTTPException(status_code=422, detail="ends_at must be after starts_at")
+
+    appointment, first_name, last_name = row
+    conflict = (await session.exec(
+        select(Appointment.id)
+        .where(
+            Appointment.business_id == business_id,
+            Appointment.id != appointment_id,
+            Appointment.starts_at < ends_at,
+            Appointment.ends_at > starts_at,
+            Appointment.active == True,
+        )
+        .limit(1)
+    )).first()
+    if conflict is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="No availability for the requested time slot",
+        )
+
+    appointment.starts_at = starts_at
+    appointment.ends_at = ends_at
+    session.add(appointment)
+    await session.commit()
+    return {
+        "starts_at": starts_at,
+        "ends_at": ends_at,
+        "staff_name": " ".join(name for name in (first_name, last_name) if name),
+    }
 
 
 @router.get("/{id}", response_model=Appointment)

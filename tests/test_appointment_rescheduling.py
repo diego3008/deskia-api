@@ -94,3 +94,58 @@ async def test_find_customer_appointment_validates_uuid_parameters(client):
     )
 
     assert response.status_code == 422
+
+
+async def test_reschedule_appointment_updates_dates_and_returns_staff_name(
+    client, session
+):
+    business_id = uuid4()
+    appointment_id = uuid4()
+    staff = BusinessStaff(
+        id=uuid4(),
+        business_id=business_id,
+        first_name="Ada",
+        last_name="Lovelace",
+    )
+    service = Service(
+        id=uuid4(),
+        business_id=business_id,
+        name="Haircut",
+        duration_minutes=60,
+    )
+    original_starts_at = datetime.now(timezone.utc) + timedelta(days=1)
+    appointment = Appointment(
+        id=appointment_id,
+        business_id=business_id,
+        customer_id=uuid4(),
+        business_staff_id=staff.id,
+        service_id=service.id,
+        starts_at=original_starts_at,
+        ends_at=original_starts_at + timedelta(hours=1),
+        active=True,
+    )
+    session.add_all([staff, service, appointment])
+    await session.commit()
+
+    new_starts_at = original_starts_at + timedelta(days=2)
+    new_ends_at = new_starts_at + timedelta(hours=1)
+    response = await client.put(
+        "/appointments/reschedule",
+        params={
+            "business_id": str(business_id),
+            "appointment_id": str(appointment_id),
+        },
+        json={
+            "starts_at": new_starts_at.isoformat(),
+            "ends_at": new_ends_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["starts_at"].startswith(new_starts_at.isoformat()[:19])
+    assert body["ends_at"].startswith(new_ends_at.isoformat()[:19])
+    assert body["staff_name"] == "Ada Lovelace"
+    updated = await session.get(Appointment, appointment_id)
+    assert updated.starts_at == new_starts_at
+    assert updated.ends_at == new_ends_at
