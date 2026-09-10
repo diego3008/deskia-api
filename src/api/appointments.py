@@ -59,24 +59,51 @@ async def check_availability(
     return result.first() is None
 
 
-@router.get('/find_customer_appointment', response_model=Appointment | None)
+@router.get("/find_customer_appointment", response_model=dict)
 async def find_customer_appointment(
-    customer_id: str,
-    business_id: str,
-    appointment_date: datetime | None = None,
+    customer_id: UUID,
+    business_id: UUID,
     session: AsyncSession = Depends(get_session),
 ):
-    query = (
-        select(Appointment)
-        .where(Appointment.business_id == business_id)
-        .where(Appointment.customer_id == customer_id)
-        .where(Appointment.active)
-    )
-    if appointment_date is not None:
-        query = query.where(func.date(Appointment.starts_at) == appointment_date)
+    row = (
+        await session.exec(
+            select(
+                Appointment.id,
+                Appointment.starts_at,
+                Service.name,
+                BusinessStaff.first_name,
+                BusinessStaff.last_name,
+            )
+            .join(
+                BusinessStaff,
+                BusinessStaff.id == Appointment.business_staff_id,
+            )
+            .join(Service, Service.id == Appointment.service_id)
+            .where(
+                Appointment.business_id == business_id,
+                Appointment.customer_id == customer_id,
+                Appointment.active == True,
+                Appointment.starts_at >= datetime.now(timezone.utc),
+            )
+            .order_by(Appointment.starts_at, Appointment.id)
+            .limit(1)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Upcoming active appointment not found",
+        )
 
-    res = await session.exec(query)
-    return res.first()
+    appointment_id, starts_at, service_name, first_name, last_name = row
+    return {
+        "appointment_id": appointment_id,
+        "starts_at": starts_at,
+        "service_name": service_name,
+        "staff_name": " ".join(
+            name for name in (first_name, last_name) if name
+        ),
+    }
 
     
     
