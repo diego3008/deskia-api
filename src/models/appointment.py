@@ -1,27 +1,88 @@
 from datetime import date, datetime
-from uuid import UUID, uuid4
+from uuid import UUID
 from pydantic import BaseModel
-from sqlalchemy import Column, DateTime, ForeignKey, func
+from sqlalchemy import BigInteger, Boolean, CheckConstraint, Column, DateTime, ForeignKey, Text, Uuid, func, text
 from sqlmodel import Field, SQLModel
 
 
 class AppointmentBase(SQLModel):
     starts_at: datetime = Field(sa_type=DateTime(timezone=True))
     ends_at: datetime = Field(sa_type=DateTime(timezone=True))
-    active: bool = Field(default=True)
-    notes: str | None = None
-    business_id: UUID = Field(
-        sa_column=Column("business", ForeignKey("businesses.id"), nullable=False)
+    notes: str | None = Field(default=None, sa_column=Column(Text, nullable=True))
+    business_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("businesses.id"),
+            nullable=False,
+            server_default=text("gen_random_uuid()"),
+        )
     )
-    customer_id: UUID = Field(
-        sa_column=Column("customer_id", ForeignKey("customers.id"), nullable=False)
+    customer_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("customers.id"),
+            nullable=False,
+            server_default=text("gen_random_uuid()"),
+        )
+    )
+    active: bool | None = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=True, server_default=text("true")),
+    )
+    status: int | None = Field(
+        default=None,
+        sa_column=Column(
+            BigInteger,
+            ForeignKey(
+                "appointment_status_codes.id",
+                onupdate="RESTRICT",
+                ondelete="RESTRICT",
+            ),
+            nullable=True,
+        ),
+    )
+    cancellation_reason: str | None = Field(
+        default=None, sa_column=Column(Text, nullable=True)
+    )
+    cancelled_at: datetime | None = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    business_staff_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("business_staff.id"),
+            nullable=True,
+            server_default=text("gen_random_uuid()"),
+        ),
+    )
+    service_id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            ForeignKey("services.id", onupdate="CASCADE"),
+            nullable=True,
+            server_default=text("gen_random_uuid()"),
+        ),
     )
 
 
 class Appointment(AppointmentBase, table=True):
     __tablename__ = "appointments"
+    __table_args__ = (CheckConstraint("ends_at > starts_at", name="appointments_check"),)
 
-    id: UUID | None = Field(default_factory=uuid4, primary_key=True)
+    id: UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            Uuid(as_uuid=True),
+            primary_key=True,
+            nullable=False,
+            server_default=text("extensions.uuid_generate_v4()"),
+        ),
+    )
     created_at: datetime | None = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), server_default=func.now(), nullable=False),
@@ -37,6 +98,7 @@ class AppointmentUpdate(BaseModel):
     starts_at: datetime | None = None
     ends_at: datetime | None = None
     business_id: UUID | None = None
+    status: int | None = None
 
 class AppointmentSearch(BaseModel):
     starts_at: date | None = None
@@ -63,4 +125,9 @@ class AppointmentCreate(BaseModel):
     customer_id: UUID = Field(
         description="The UUID of the customer who requested the appointment."
     )
-
+    business_staff_id: UUID = Field(
+        description="The UUID of the staff member that will provide the service to the customer."
+    )
+    service_id: UUID = Field(
+        description="The UUID of the service requested by the customer."
+    )

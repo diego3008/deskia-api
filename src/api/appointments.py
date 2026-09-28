@@ -1,12 +1,19 @@
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Union
 from uuid import UUID
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, Body, Depends, HTTPException, Response
 from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from src.models.business import Business
+from src.models.business_hour import BusinessHour
+from src.models.business_schedule_exception import BusinessScheduleException
+from src.models.business_staff import BusinessStaff
+from src.models.service import Service
+from src.models.staff_block import StaffBlock
+from src.models.staff_hour import StaffHour
+from src.models.staff_service import StaffService
 from src.db import get_session
 from src.models.appointment import Appointment, AppointmentBase, AppointmentCreate, AppointmentUpdate
 
@@ -59,6 +66,138 @@ async def check_availability(
     return result.first() is None
 
 
+@router.get("/validate-date", response_model=Union[bool, dict])
+async def validate_appointment_date(
+    business_id: UUID,
+    requested_start_date: datetime,
+    service_name: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Check if assigned staff can perform the service at the requested date.
+
+    Service names use a case-insensitive substring match within the business.
+    Naive datetimes use the business timezone; ambiguous/nonexistent local
+    times require an explicit UTC offset. Weekdays use Monday=0, Sunday=6.
+    Active appointments must not overlap the requested service window.
+    """
+    business = await session.get(Business, business_id)
+    if business is None:
+        raise HTTPException(status_code=404, detail="Business not found")
+
+    service_name = service_name.strip()
+    if not service_name:
+        raise HTTPException(status_code=422, detail="service_name must not be blank")
+    requested_service = (await session.exec(
+        select(Service)
+        .where(
+            Service.business_id == business_id,
+            Service.name.icontains(service_name, autoescape=True),
+        )
+        .order_by(func.length(Service.name), Service.name, Service.id)
+        .limit(1)
+    )).first()
+    if requested_service is None:
+        raise HTTPException(status_code=404, detail="Service not found")
+
+    if not business.is_active:
+        return False
+
+    try:
+        tz = ZoneInfo(business.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise HTTPException(status_code=500, detail="Invalid business timezone")
+
+    try:
+        if requested_start_date.tzinfo is None:
+            local = requested_start_date.replace(tzinfo=tz)
+            if (
+                local.utcoffset() != local.replace(fold=1).utcoffset()
+                or local.astimezone(timezone.utc).astimezone(tz).replace(tzinfo=None)
+                != requested_start_date
+            ):
+                raise HTTPException(status_code=422, detail="Provide an explicit UTC offset for this local time")
+        else:
+            local = requested_start_date.astimezone(tz)
+        starts_at = local.astimezone(timezone.utc)
+    except OverflowError:
+        raise HTTPException(status_code=422, detail="Requested date is outside the supported timezone range")
+    if starts_at <= datetime.now(timezone.utc):
+        return False
+
+    day = local.date()
+    exception = (await session.exec(select(BusinessScheduleException).where(
+        BusinessScheduleException.business_id == business_id,
+        BusinessScheduleException.exception_date == day,
+    ))).first()
+    if exception is not None:
+        if exception.is_closed:
+            return False
+        windows = [(exception.start_time, exception.end_time)]
+    else:
+        windows = (await session.exec(select(BusinessHour.start_time, BusinessHour.end_time).where(
+            BusinessHour.business_id == business_id,
+            BusinessHour.day_of_week == day.weekday(),
+        ))).all()
+    business_windows = [
+        (datetime.combine(day, start, tz).astimezone(timezone.utc),
+         datetime.combine(day, end, tz).astimezone(timezone.utc))
+        for start, end in windows if start is not None and end is not None
+    ]
+    if not business_windows:
+        return False
+
+    candidates = (await session.exec(
+        select(StaffService, Service, StaffHour)
+        .join(Service, Service.id == StaffService.service_id)
+        .join(BusinessStaff, BusinessStaff.id == StaffService.business_staff_id)
+        .join(StaffHour, StaffHour.business_staff_id == BusinessStaff.id)
+        .where(
+            BusinessStaff.business_id == business_id,
+            BusinessStaff.active == True,
+            Service.business_id == business_id,
+            StaffService.service_id == requested_service.id,
+            StaffService.active == True,
+            StaffHour.active == True,
+            StaffHour.day_of_week == day.weekday(),
+        )
+    )).all()
+    for assignment, service, shift in candidates:
+        duration = assignment.custom_duration_minutes
+        if duration is None:
+            duration = service.duration_minutes
+        before, after = service.buffer_before_minutes, service.buffer_after_minutes
+        if duration <= 0 or before < 0 or after < 0:
+            continue
+        try:
+            occupied_start = starts_at - timedelta(minutes=before)
+            end_date = starts_at + timedelta(minutes=duration)
+            occupied_end = starts_at + timedelta(minutes=duration + after)
+        except OverflowError:
+            continue
+        if not any(start <= occupied_start and occupied_end <= end for start, end in business_windows):
+            continue
+        shift_start = datetime.combine(day, shift.start_time, tz).astimezone(timezone.utc)
+        shift_end = datetime.combine(day, shift.end_time, tz).astimezone(timezone.utc)
+        if not shift_start <= occupied_start < occupied_end <= shift_end:
+            continue
+        conflict = (await session.exec(select(Appointment.id).where(
+            Appointment.business_id == business_id,
+            Appointment.starts_at < occupied_end,
+            Appointment.ends_at > occupied_start,
+            Appointment.active == True,
+        ).limit(1))).first()
+        if conflict is not None:
+            continue
+        block = (await session.exec(select(StaffBlock.id).where(
+            StaffBlock.business_staff_id == assignment.business_staff_id,
+            StaffBlock.start_at < occupied_end,
+            StaffBlock.end_at > occupied_start,
+        ).limit(1))).first()
+        if block is None:
+            return {"available": True, "service_id": requested_service.id, "ends_at": end_date, "starts_at": requested_start_date, "business_staff_id": assignment.business_staff_id}
+    return False
+
+
 @router.get("/find_customer_appointment", response_model=dict)
 async def find_customer_appointment(
     customer_id: UUID,
@@ -105,15 +244,38 @@ async def find_customer_appointment(
         ),
     }
 
-    
-    
+
+@router.put("/cancel", response_model=Appointment)
+async def cancel_appointment(
+    appointment_id: UUID,
+    business_id: UUID,
+    session: AsyncSession = Depends(get_session),
+):
+    appointment = (
+        await session.exec(
+            select(Appointment).where(
+                Appointment.id == appointment_id,
+                Appointment.business_id == business_id,
+            )
+        )
+    ).first()
+    if appointment is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    appointment.cancelled_at = datetime.now(timezone.utc)
+    appointment.active = False
+    appointment.status = 3
+    session.add(appointment)
+    await session.commit()
+    await session.refresh(appointment)
+    return appointment
+
 
 @router.post("/book", status_code=201)
 async def book_appointment(
     appointment: AppointmentCreate, session: AsyncSession = Depends(get_session)
 ):
-    db_obj = Appointment.model_validate(appointment, update={"status": "pending"})
-    print(appointment.customer_id)
+    db_obj = Appointment.model_validate(appointment, update={"status": 2})
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)

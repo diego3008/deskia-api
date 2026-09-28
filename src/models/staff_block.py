@@ -1,6 +1,8 @@
 from datetime import datetime
+from enum import Enum
 from uuid import UUID
 
+from pydantic import BaseModel, model_validator
 from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, text
 from sqlmodel import Field, SQLModel
 
@@ -31,3 +33,37 @@ class StaffBlock(StaffBlockBase, table=True):
         primary_key=True,
         sa_column_kwargs={"server_default": text("gen_random_uuid()")},
     )
+
+
+class StaffBlockType(str, Enum):
+    BREAK = "BREAK"
+    MEETING = "MEETING"
+    VACATION = "VACATION"
+    PERSONAL = "PERSONAL"
+    SICK_LEAVE = "SICK_LEAVE"
+    MANUAL_BLOCK = "MANUAL_BLOCK"
+
+
+class StaffBlockCreate(BaseModel):
+    start_at: datetime
+    end_at: datetime
+    block_type: StaffBlockType
+    reason: str | None = Field(
+        default=None,
+        max_length=255,
+    )
+
+    @model_validator(mode="after")
+    def validate_block(self):
+        if self.start_at.tzinfo is None:
+            raise ValueError("start_at must include a timezone")
+
+        if self.end_at.tzinfo is None:
+            raise ValueError("end_at must include a timezone")
+
+        if self.start_at >= self.end_at:
+            raise ValueError(
+                "start_at must be before end_at"
+            )
+
+        return self

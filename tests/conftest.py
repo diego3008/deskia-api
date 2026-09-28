@@ -11,8 +11,14 @@ from src.db import get_session
 @pytest_asyncio.fixture
 async def session():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    appointment_id = SQLModel.metadata.tables["appointments"].c.id
+    postgres_default = appointment_id.server_default
+    appointment_id.server_default = None
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+    finally:
+        appointment_id.server_default = postgres_default
     factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     async with factory() as session:
         yield session
